@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เครื่องมือวิเคราะห์ไฟล์ APK/ZIP</title>
+    <!-- เพิ่ม JSZip library จาก CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        /* สไตล์ชีตแบบเรียบง่าย เน้นการใช้งาน */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        #file-input {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 20px;
+            border: 2px dashed #ccc;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #status {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 5px;
+            display: none; /* ซ่อนไว้ก่อน */
+        }
+        .status-processing {
+            background-color: #eaf2ff;
+            color: #0052cc;
+        }
+        .status-error {
+            background-color: #ffebe6;
+            color: #de350b;
+        }
+        .status-success {
+            background-color: #e3fcef;
+            color: #006644;
+        }
+        #results-container {
+            border: 1px solid #ddd;
+            background-color: #fafafa;
+            padding: 15px;
+            border-radius: 5px;
+            max-height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap; /* ให้ตัดบรรทัดอัตโนมัติ */
+            word-wrap: break-word; /* ให้ตัดคำที่ยาวเกิน */
+            font-family: "Courier New", Courier, monospace;
+            font-size: 14px;
+            display: none; /* ซ่อนไว้ก่อน */
+        }
+        #download-btn {
+            display: none; /* ซ่อนไว้ก่อน */
+            width: 100%;
+            padding: 15px;
+            margin-top: 20px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            text-align: center;
+        }
+        #download-btn:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>เครื่องมือวิเคราะห์ไฟล์ APK / ZIP</h1>
+        <p>อัปโหลดไฟล์ .apk หรือ .zip เพื่อดูรายการไฟล์ข้างในและเนื้อหาที่เป็นข้อความ (รองรับขนาดไฟล์สูงสุด 500 MB)</p>
+
+        <!-- Input สำหรับเลือกไฟล์ -->
+        <input type="file" id="file-input" accept=".zip,.apk">
+
+        <!-- แสดงสถานะการทำงาน -->
+        <div id="status"></div>
+
+        <!-- แสดงผลลัพธ์ -->
+        <div id="results-container"></div>
+
+        <!-- ปุ่มดาวน์โหลด -->
+        <button id="download-btn">ดาวน์โหลดผลลัพธ์เป็นไฟล์ .txt</button>
+    </div>
+
+    <script>
+        // ดึง Element ที่ต้องใช้จากหน้า HTML
+        const fileInput = document.getElementById('file-input');
+        const statusDiv = document.getElementById('status');
+        const resultsContainer = document.getElementById('results-container');
+        const downloadBtn = document.getElementById('download-btn');
+
+        // กำหนดขนาดไฟล์สูงสุด (500 MB)
+        const MAX_FILE_SIZE = 500 * 1024 * 1024; 
+        
+        let fullTextContent = ""; // ตัวแปรสำหรับเก็บผลลัพธ์ทั้งหมดเพื่อดาวน์โหลด
+
+        // เพิ่ม Event Listener เมื่อมีการเลือกไฟล์
+        fileInput.addEventListener('change', handleFileSelect);
+
+        function handleFileSelect(event) {
+            // รีเซ็ตค่าต่างๆ เมื่อมีการเลือกไฟล์ใหม่
+            resetUI();
+
+            const file = event.target.files[0];
+            if (!file) {
+                return;
+            }
+
+            // ตรวจสอบขนาดไฟล์
+            if (file.size > MAX_FILE_SIZE) {
+                showStatus('ไฟล์มีขนาดใหญ่เกิน 500 MB!', 'error');
+                fileInput.value = ''; // เคลียร์ค่าไฟล์ที่เลือก
+                return;
+            }
+
+            // แสดงสถานะกำลังประมวลผล
+            showStatus('กำลังประมวลผลไฟล์... (อาจใช้เวลาสักครู่สำหรับไฟล์ขนาดใหญ่)', 'processing');
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                // ใช้ JSZip เพื่ออ่านข้อมูลไฟล์
+                JSZip.loadAsync(e.target.result)
+                    .then(processZip)
+                    .catch(handleError);
+            };
+            reader.onerror = function() {
+                handleError(new Error('เกิดข้อผิดพลาดในการอ่านไฟล์'));
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        async function processZip(zip) {
+            let outputText = "";
+            const filePromises = [];
+
+            // วนลูปไฟล์ทั้งหมดใน zip
+            zip.forEach((relativePath, zipEntry) => {
+                // ไม่ต้องประมวลผลโฟลเดอร์
+                if (zipEntry.dir) {
+                    return;
+                }
+
+                // สร้าง Promise สำหรับการอ่านแต่ละไฟล์
+                const promise = zipEntry.async('uint8array').then(content => {
+                    // พยายามแปลงข้อมูลไบนารีเป็นข้อความ
+                    let fileContentText;
+                    try {
+                        // ใช้ TextDecoder เพื่อแปลง UTF-8
+                        const decoder = new TextDecoder('utf-8', { fatal: true });
+                        fileContentText = decoder.decode(content);
+                    } catch (error) {
+                        // หากแปลงไม่ได้ ให้ระบุว่าเป็นข้อมูลไบนารี
+                        fileContentText = '[ข้อมูลไบนารี - ไม่สามารถแสดงเป็นข้อความได้]';
+                    }
+                    
+                    // สร้างรูปแบบการแสดงผลสำหรับแต่ละไฟล์
+                    return `========================================\n` +
+                           `File: ${zipEntry.name}\n` +
+                           `========================================\n\n` +
+                           `${fileContentText}\n\n`;
+                }).catch(err => {
+                    // กรณีเกิดข้อผิดพลาดในการอ่านไฟล์ย่อย
+                    return `========================================\n` +
+                           `File: ${zipEntry.name}\n` +
+                           `========================================\n\n` +
+                           `[เกิดข้อผิดพลาดในการอ่านไฟล์นี้: ${err.message}]\n\n`;
+                });
+                filePromises.push(promise);
+            });
+
+            // รอให้ทุกไฟล์ประมวลผลเสร็จ
+            const results = await Promise.all(filePromises);
+            outputText = results.join('');
+            
+            // เก็บผลลัพธ์ทั้งหมดไว้สำหรับดาวน์โหลด
+            fullTextContent = outputText;
+
+            // แสดงผลลัพธ์บนหน้าเว็บ
+            resultsContainer.textContent = outputText;
+            resultsContainer.style.display = 'block';
+            
+            // แสดงปุ่มดาวน์โหลด
+            downloadBtn.style.display = 'block';
+
+            showStatus(`ประมวลผลสำเร็จ! พบ ${Object.keys(zip.files).length} รายการ`, 'success');
+        }
+
+        function handleError(error) {
+            console.error('JSZip Error:', error);
+            showStatus(`เกิดข้อผิดพลาด: ${error.message}`, 'error');
+            resetUI(false); // รีเซ็ต UI แต่ไม่ต้องเคลียร์ไฟล์อินพุต
+        }
+
+        function showStatus(message, type) {
+            statusDiv.textContent = message;
+            statusDiv.className = `status-${type}`;
+            statusDiv.style.display = 'block';
+        }
+
+        function resetUI(clearFileInput = true) {
+            statusDiv.style.display = 'none';
+            resultsContainer.style.display = 'none';
+            resultsContainer.textContent = '';
+            downloadBtn.style.display = 'none';
+            fullTextContent = "";
+            if (clearFileInput) {
+                fileInput.value = '';
+            }
+        }
+
+        // Event Listener สำหรับปุ่มดาวน์โหลด
+        downloadBtn.addEventListener('click', () => {
+            if (!fullTextContent) return;
+
+            // สร้าง Blob จากเนื้อหาข้อความ
+            const blob = new Blob([fullTextContent], { type: 'text/plain;charset=utf-8' });
+            
+            // สร้าง URL ชั่วคราวสำหรับดาวน์โหลด
+            const url = URL.createObjectURL(blob);
+            
+            // สร้าง element <a> เพื่อใช้ในการดาวน์โหลด
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'analysis_result.txt'; // ตั้งชื่อไฟล์ที่จะดาวน์โหลด
+            document.body.appendChild(a);
+            a.click(); // สั่งให้คลิกเพื่อเริ่มดาวน์โหลด
+            
+            // ลบ element และ URL ที่สร้างขึ้นชั่วคราว
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+    </script>
+</body>
+</html>
